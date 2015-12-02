@@ -1,8 +1,14 @@
-#include <opencv2/core/core.hpp>
+/*#include <opencv2/core/core.hpp>
 #include "opencv2/opencv.hpp"
 #include <cv.h>
 #include <opencv2/highgui/highgui.hpp>
 #include "opencv2/imgproc/imgproc.hpp"
+#include <opencv2/ml.hpp>*/
+#include <cv.h>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include "opencv2/imgcodecs.hpp"
+#include <opencv2/highgui.hpp>
 #include <opencv2/ml.hpp>
 #include <iostream>
 #include <string>
@@ -36,7 +42,7 @@ vector<Mat> lbpVector(vector<Mat> params);
 void myImageShow(Mat image);
 
 
-uchar values[] = {128, 64, 32, 1, 0, 16, 2, 4, 8};
+uchar values[3][3] = {{128, 64, 32}, {1, 0, 16}, {2, 4, 8}};
 Mat mask( 3, 3, CV_8UC1, values);
 
 //training data
@@ -49,11 +55,11 @@ uchar labels[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'x', 'y', '+
 int main() {
 
 	int num_files = 15; //change this value whenevr you add new file
-	int descriptor_cells = 8*8;
+	int descriptor_cells = 8*8*256;
 	
 	vector<Mat> training_images_vector;
 
-	Mat training_data = Mat::zeros(num_files, descriptor_cells, CV_8UC4);
+	Mat training_data = Mat::zeros(num_files, descriptor_cells, CV_8UC1);
 
 	for (int i = 0; i < num_files; i++) {
 		//for reading colored images
@@ -64,17 +70,25 @@ int main() {
 	for (int i = 0; i < num_files; i++) {
 		Mat image = training_images_vector[i];
 		if (image.empty()) break;
-		
+		//binarization
 		threshold(image, image, 0, 255, CV_THRESH_BINARY_INV + CV_THRESH_OTSU);
-
+		
+		//separating horizontally
 		vector<int> hHistogram = seperationHistogram(&image, HORIZONTAL);
 		image = (seperateByHorizontalLine(&image, hHistogram))[0];
-
+		//myImageShow(image);
+		
+		//seperating vertically
 		vector<int> vHistogram = seperationHistogram(&image, VERTICAL);
 		image = (seperateByVerticalLine(&image, vHistogram))[0];
+		//myImageShow(image);
 
-		image = characterLBP(image);
-
+		//resizing image to 32*32
+		Mat sampled;
+		resize(image, sampled, Size(32,32));
+		
+		cout << sampled.size().height << " * " << sampled.size().width << endl;
+		image = characterLBP(sampled);
 		image.copyTo(training_data.row(i));
 	}
 
@@ -83,8 +97,26 @@ int main() {
 	myImageShow(training_data);
 
 
-	Mat labelsMat(num_files, 1, CV_8UC1, labels);
+	Mat labels_mat(num_files, 1, CV_8UC1, labels);
+
+
+	// Set up SVM's parameters
+    	SVM::Params params;
+    	params.svmType    = SVM::C_SVC;
+    	params.kernelType = SVM::LINEAR;
+    	params.termCrit   = TermCriteria(TermCriteria::MAX_ITER, 100, 1e-6);
+
+
+	// Train the SVM
+	Mat trainingDataMat, labelsMat;
+	training_data.convertTo(trainingDataMat, CV_32FC1);
+	labels_mat.convertTo(labelsMat, CV_32SC1);
+    	Ptr<SVM> svm = StatModel::train<SVM>(trainingDataMat, ROW_SAMPLE, labelsMat, params);
+
 	
+	
+
+	svm->save("./res/classifier");
 	
 	
 
@@ -185,23 +217,22 @@ vector<Mat> seperateByVerticalLine(Mat *image,vector<int> hist){
 
 
 //lbp of 32*32 image divided into regions of 8*8 cells
-Mat characterLBP(Mat I) {
-
+Mat characterLBP(Mat Image) {
+	Mat I;
+	copyMakeBorder(Image, I, 1,1,1,1, BORDER_CONSTANT, Scalar(0));
 	Size size = I.size();
+	cout << size.height << " * " << size.width << endl;
 
-	Mat lbpVector = Mat::zeros(1, 64, CV_8UC4);
-
+	Mat lbpVector = Mat::zeros(1, 64*256, CV_8UC1);
+	
 	int cell = 0;
 
-    for (int i = 0; i < 32; i += 4) {
-        for (int j = 0; j < 32; j += 4) {
-            int channel = 0;
-            for (int k = 1; k < 3; k++) {
-                for (int l = 1; l < 3; l++){
+    for (int i = 1; i <= 32; i += 4) {
+        for (int j = 1; j <= 32; j += 4) {
+            for (int k = 0; k < 4; k++) {
+                for (int l = 0; l < 4; l++){
                     unsigned char decimalValue = lbpMask(I, i + k, j + l);
-                    lbpVector.at<Vec4b>(0,cell)[channel] = decimalValue;
-                    cout << "channel: " << channel << endl;
-				    channel++;    
+                    lbpVector.at<uchar>(0,cell*256+decimalValue) = lbpVector.at<uchar>(0,cell*256+decimalValue) + 1;  
                 }
             }
             cell++;

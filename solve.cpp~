@@ -1,9 +1,15 @@
-#include <opencv2/core/core.hpp>
+/*#include <opencv2/core/core.hpp>
 #include <cv.h>
 #include <opencv2/highgui/highgui.hpp>
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/features2d.hpp"
-#include <opencv2/ml/ml.hpp>
+#include <opencv2/ml/ml.hpp>*/
+#include <cv.h>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include "opencv2/imgcodecs.hpp"
+#include <opencv2/highgui.hpp>
+#include <opencv2/ml.hpp>
 #include <iostream>
 #include <string>
 #include <stdio.h>
@@ -13,6 +19,7 @@
 #include <vector>
 
 using namespace cv;
+using namespace cv::ml;
 using namespace std;
 
 
@@ -34,11 +41,13 @@ Mat characterLBP(Mat I);
 unsigned char lbpMask(Mat image, int i, int j);
 vector<Mat> lbpVector(vector<Mat> params);
 
-uchar values[] = {128, 64, 32, 1, 0, 16, 2, 4, 8};
+uchar values[3][3] = {{128, 64, 32}, {1, 0, 16}, {2, 4, 8}};
 Mat mask( 3, 3, CV_8UC1, values);
 void myImageShow(Mat image);
 
 int main(int argc, char** argv) {
+
+	Ptr<SVM> svm = StatModel::load<SVM>("./res/classifier");
 
 
 	String window_name = "binarized_image_window";
@@ -108,8 +117,35 @@ int main(int argc, char** argv) {
     vector<Mat> lbp_params_1 = lbpVector(params_image_1);
     vector<Mat> lbp_params_2 = lbpVector(params_image_2);
 
-    showCharImages(lbp_params_1);
-    showCharImages(lbp_params_2);
+    //showCharImages(lbp_params_1);
+    //showCharImages(lbp_params_2);
+	cout << "equation 1: ";
+	for (int i = 0; i < lbp_params_1.size(); i++) {
+		Mat image = lbp_params_1[i];
+		if (image.empty()) break;
+		Mat testVector;
+		image.convertTo(testVector, CV_32FC1);
+		uchar symbol = (uchar)svm->predict(testVector);
+		cout << symbol << " ";
+	}
+
+	cout << "\n";
+
+
+	cout << "equation 2: ";
+	for (int i = 0; i < lbp_params_2.size(); i++) {
+		Mat image = lbp_params_2[i];
+		if (image.empty()) break;
+		Mat testVector;
+		image.convertTo(testVector, CV_32FC1);
+		uchar symbol = (uchar)svm->predict(testVector);
+		cout << symbol << " ";
+	}
+
+	cout << "\n";
+	/*Mat test;
+	lbp_params_1[1].convertTo(test, CV_32FC1);
+	cout << "svm: " << svm->predict(test) << endl;*/
 
     
 	return 0;
@@ -177,35 +213,6 @@ vector<Mat> seperateByHorizontalLine(Mat *image,vector<int> hist) {
 		}
 	}
 
-	//cout << 0 << endl;
-
-	/*int tmpHeight = equation1_y.b - equation1_y.a + 1;
-	int width = (*image).size().width;
-	Mat equation1_image = Mat::zeros(tmpHeight, width, CV_8UC1);
-
-	for (int i = 0; i < tmpHeight; i++) {
-		for (int j = 0; j < width; j++) {
-			int offset = equation1_y.a;
-			equation1_image.at<int>(i,j) = (*image).at<int>(i+offset,j);
-		}
-	}
-
-	cout << 0 << endl;
-
-
-	tmpHeight = equation2_y.b - equation2_y.a + 1;
-	Mat equation2_image = Mat::zeros(tmpHeight, width, CV_8UC1);
-
-	for (int i = 0; i < tmpHeight; i++) {
-		for (int j = 0; j < width; j++) {
-			int offset = equation2_y.a;
-			equation2_image.at<int>(i,j) = (*image).at<int>(i+offset,j);
-		}
-	}*/
-	
-
-	/*equation_images[0] = equation1_image;
-	equation_images[1] = equation2_image;*/
 	int width = (*image).size().width;
 	cout << equation1_y.a << " " << equation1_y.b << endl;
 	cout << equation2_y.a << " " << equation2_y.b << endl;
@@ -278,7 +285,54 @@ void resizeVector(vector<Mat>& images) {
 
 
 //lbp of 32*32 image divided into regions of 8*8 cells
-Mat characterLBP(Mat I) {
+Mat characterLBP(Mat Image) {
+	Mat I;
+	copyMakeBorder(Image, I, 1,1,1,1, BORDER_CONSTANT, Scalar(0));
+	Size size = I.size();
+	cout << size.height << " * " << size.width << endl;
+
+	Mat lbpVector = Mat::zeros(1, 64*256, CV_8UC1);
+	
+	int cell = 0;
+
+    for (int i = 1; i <= 32; i += 4) {
+        for (int j = 1; j <= 32; j += 4) {
+            for (int k = 0; k < 4; k++) {
+                for (int l = 0; l < 4; l++){
+                    unsigned char decimalValue = lbpMask(I, i + k, j + l);
+                    lbpVector.at<uchar>(0,cell*256+decimalValue) = lbpVector.at<uchar>(0,cell*256+decimalValue) + 1;  
+                }
+            }
+            cell++;
+       }
+    }
+
+	return lbpVector;
+}
+
+unsigned char lbpMask(Mat image, int i, int j) {
+	
+
+	unsigned char center = image.at<uchar>(i, j);
+	unsigned char result = 0;
+
+	int p = i-1;
+	for (; p < i+2; p++){
+		int q = j-1;
+		for (; q < j+2; q++)
+		{
+			int neighbour_value = image.at<uchar>(p,q);
+			if (center <= neighbour_value)
+				result += mask.at<uchar>(p-i+1, q-j+1);			
+		}			
+	}
+
+	return result;
+}
+
+
+//lbp of 32*32 image divided into regions of 8*8 cells
+/*Mat characterLBP(Mat I) {
 
 	Size size = I.size();
 
@@ -322,7 +376,7 @@ unsigned char lbpMask(Mat image, int i, int j) {
 	}
 
 	return result;
-}
+}*/
 
 void myImageShow(Mat image) {
     String window_name = "my_image_window";
